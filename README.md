@@ -1,4 +1,4 @@
-# ExVal - Online Exam Platform
+# ExVal - Exam Evaluation
 
 ExVal is an online exam system where students can attempt MCQs, write descriptive answers and solve C++ coding questions, and examiners can create exams and check the results.
 
