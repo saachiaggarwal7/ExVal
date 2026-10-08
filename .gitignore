@@ -1,0 +1,5 @@
+backend/exval_server
+backend/build/
+submissions/job_*/
+*.log
+.vscode/
