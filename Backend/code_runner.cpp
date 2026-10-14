@@ -176,3 +176,20 @@ std::string CodeRunner::trim(const std::string& s) {
 
     return s.substr(start, end - start);
 }
+
+std::string CodeRunner::jsonEscape(const std::string& s) {
+    std::string result;
+
+    for (char c : s) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n";  break;
+            case '\r': result += "\\r";  break;
+            case '\t': result += "\\t";  break;
+            default:   result += c;
+        }
+    }
+
+    return result;
+}
