@@ -33,3 +33,14 @@ std::map<std::string,std::string> parsePairs(const std::string &s) {
     }
     return m;
 }
+std::string html(const std::string &s) {
+    std::string r;
+    for (char c:s) {
+        if(c=='&') r+="&amp;";
+        else if(c=='<') r+="&lt;";
+        else if(c=='>') r+="&gt;";
+        else if(c=='\"') r+="&quot;";
+        else r+=c;
+    }
+    return r;
+}
