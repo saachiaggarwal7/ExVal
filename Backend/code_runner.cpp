@@ -18,3 +18,15 @@ CodeRunner::CodeRunner() {
     for (int i = 0; i < 3; i++)
         workers.emplace_back(&CodeRunner::worker, this);
 }
+
+CodeRunner::~CodeRunner() {
+    {
+        std::lock_guard<std::mutex> lock(qm);
+        stop = true;
+    }
+
+    qcv.notify_all();
+
+    for (auto& t : workers)
+        t.join();
+}
