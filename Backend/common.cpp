@@ -19,3 +19,17 @@ std::string urlDecode(const std::string &s) {
     }
     return r;
 }
+std::map<std::string,std::string> parsePairs(const std::string &s) {
+    std::map<std::string,std::string> m;
+    size_t st=0;
+    while (st<=s.size()) {
+        size_t e=s.find('&',st);
+        if (e==std::string::npos) e=s.size();
+        std::string p=s.substr(st,e-st);
+        size_t eq=p.find('=');
+        if (eq!=std::string::npos) m[urlDecode(p.substr(0,eq))]=urlDecode(p.substr(eq+1));
+        if (e==s.size()) break;
+        st=e+1;
+    }
+    return m;
+}
