@@ -88,3 +88,79 @@ bool CodeRunner::compileProgram(const std::string& dir) {
 
     return WIFEXITED(status) && WEXITSTATUS(status) == 0;
 }
+
+bool CodeRunner::runProgram(
+    const std::string& dir, const std::string& input,
+    int limitMs, int memoryMb, int& elapsedMs, bool& timedOut)
+{
+    timedOut = false;
+
+    std::ofstream(dir + "/input.txt") << input;
+
+    pid_t p = fork();
+
+    if (p == 0) {
+        chdir(dir.c_str());
+
+        int in = open("input.txt", O_RDONLY);
+        int out = open("output.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        int err = open("runtime_error.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+        dup2(in, STDIN_FILENO);
+        dup2(out, STDOUT_FILENO);
+        dup2(err, STDERR_FILENO);
+
+        close(in);
+        close(out);
+        close(err);
+
+        struct rlimit limit;
+        limit.rlim_cur = limit.rlim_max =
+            (rlim_t)memoryMb * 1024 * 1024;
+
+#ifdef __APPLE__
+        setrlimit(RLIMIT_DATA, &limit);
+#else
+        setrlimit(RLIMIT_AS, &limit);
+#endif
+
+        execl("./program", "./program", (char*)nullptr);
+        _exit(127);
+    }
+
+    if (p < 0)
+        return false;
+
+    auto start = std::chrono::steady_clock::now();
+    int status = 0;
+
+    while (true) {
+        pid_t result = waitpid(p, &status, WNOHANG);
+
+        if (result == p)
+            break;
+
+        if (result < 0)
+            return false;
+
+        auto now = std::chrono::steady_clock::now();
+
+        elapsedMs = (int)std::chrono::duration_cast<
+            std::chrono::milliseconds>(now - start).count();
+
+        if (elapsedMs > limitMs) {
+            timedOut = true;
+            kill(p, SIGKILL);
+            waitpid(p, &status, 0);
+            return false;
+        }
+
+        usleep(10000);
+    }
+
+    elapsedMs = (int)std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
