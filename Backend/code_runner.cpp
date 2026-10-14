@@ -193,3 +193,127 @@ std::string CodeRunner::jsonEscape(const std::string& s) {
 
     return result;
 }
+
+void CodeRunner::worker() {
+    while (true) {
+        std::shared_ptr<Job> j;
+
+        {
+            std::unique_lock<std::mutex> lock(qm);
+
+            qcv.wait(lock, [&] {
+                return stop || !q.empty();
+            });
+
+            if (stop && q.empty())
+                return;
+
+            j = q.front();
+            q.pop();
+        }
+
+        fs::path base = fs::current_path();
+        fs::path submissions = fs::exists(base / "submissions")
+            ? base / "submissions"
+            : base.parent_path() / "submissions";
+
+        fs::path jobDir = submissions / ("job_" + std::to_string(j->id));
+        std::string dir;
+
+        try {
+            fs::create_directories(jobDir);
+            dir = fs::absolute(jobDir).string();
+        } catch (const std::exception& e) {
+            j->verdict = "COMPILATION_ERROR";
+            j->compileError = std::string("Server filesystem error: ")
+                + e.what()
+                + "\nPlease ensure the submissions/ directory is writable.";
+
+            {
+                std::lock_guard<std::mutex> lock(j->m);
+                j->done = true;
+            }
+
+            j->cv.notify_one();
+            continue;
+        }
+
+        std::ofstream(dir + "/solution.cpp") << j->source;
+
+        if (!compileProgram(dir)) {
+            j->verdict = "COMPILATION_ERROR";
+
+            std::ifstream errorFile(dir + "/compile_error.txt");
+            j->compileError.assign(
+                std::istreambuf_iterator<char>(errorFile), {});
+        } else {
+            bool allPassed = true;
+
+            for (const auto& test : j->tests) {
+                int ms = 0;
+                bool timedOut = false;
+                TestResult result;
+
+                bool ok = runProgram(
+                    dir, test.first, j->timeLimitMs,
+                    j->memoryMb, ms, timedOut);
+
+                result.timeMs = ms;
+                j->timeMs = std::max(j->timeMs, ms);
+
+                if (timedOut) {
+                    result.verdict = "TIME_LIMIT_EXCEEDED";
+                    j->verdict = result.verdict;
+                    j->testResults.push_back(result);
+                    allPassed = false;
+                    break;
+                }
+
+                if (!ok) {
+                    result.verdict = "RUNTIME_ERROR";
+
+                    std::ifstream errorFile(dir + "/runtime_error.txt");
+                    j->runtimeError.assign(
+                        std::istreambuf_iterator<char>(errorFile), {});
+
+                    j->verdict = result.verdict;
+                    j->testResults.push_back(result);
+                    allPassed = false;
+                    break;
+                }
+
+                std::ifstream outputFile(dir + "/output.txt");
+                std::string actual(
+                    std::istreambuf_iterator<char>(outputFile), {});
+
+                result.actual = trim(actual);
+                result.expected = trim(test.second);
+
+                if (result.actual == result.expected) {
+                    result.verdict = "PASSED";
+                    j->passed++;
+                } else {
+                    result.verdict = "WRONG_ANSWER";
+                    j->verdict = result.verdict;
+                    allPassed = false;
+                }
+
+                j->testResults.push_back(result);
+            }
+
+            if (j->tests.empty())
+                j->verdict = "NO_TEST_CASES";
+            else if (allPassed)
+                j->verdict = "ACCEPTED";
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(j->m);
+            j->done = true;
+        }
+
+        j->cv.notify_one();
+    }
+}
+
+CodeRunner runner;
