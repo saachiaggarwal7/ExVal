@@ -52,3 +52,39 @@ std::shared_ptr<CodeRunner::Job> CodeRunner::submit(
     qcv.notify_one();
     return j;
 }
+
+bool CodeRunner::compileProgram(const std::string& dir) {
+    pid_t p = fork();
+
+    if (p == 0) {
+        chdir(dir.c_str());
+
+        setenv("PATH",
+            "/usr/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/llvm/bin",
+            1);
+
+        int err = open("compile_error.txt",
+                       O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        dup2(err, STDERR_FILENO);
+        close(err);
+
+        int out = open("/dev/null", O_WRONLY);
+        dup2(out, STDOUT_FILENO);
+        close(out);
+
+        execlp("g++", "g++", "-std=c++17", "solution.cpp",
+               "-O2", "-o", "program", (char*)nullptr);
+
+        dprintf(STDERR_FILENO, "Could not start g++: %s\n",
+                strerror(errno));
+        _exit(127);
+    }
+
+    if (p < 0)
+        return false;
+
+    int status;
+    waitpid(p, &status, 0);
+
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
