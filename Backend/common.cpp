@@ -52,4 +52,9 @@ void sendResponse(int fd,int status,const std::string&body,const std::string&cty
     std::string msg="HTTP/1.1 "+std::to_string(status)+" "+text+"\r\nContent-Type: "+ctype+"; charset=utf-8\r\nContent-Length: "+std::to_string(body.size())+"\r\nConnection: close\r\n\r\n"+body;
     ::send(fd,msg.c_str(),msg.size(),0);
 }
+void redirect(int fd,const std::string&to) {
+    std::string msg="HTTP/1.1 302 Found\r\nLocation: "+to+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    ::send(fd,msg.c_str(),msg.size(),0);
+}
+
 
