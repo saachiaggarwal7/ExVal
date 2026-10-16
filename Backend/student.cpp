@@ -22,3 +22,31 @@ static void saveCaseResults(Database& db, long long submissionId,const vector<st
         db.exec(query);
     }
 }
+
+static void upsertAnswer(Database& db, long long aid, const string& qid, bool isMCQ, const string& val, bool overwriteEmpty)
+{
+    string mcqVal = "NULL";
+    if (isMCQ && !val.empty())
+        mcqVal = val;
+    string query = "SELECT answer_id FROM student_answers WHERE attempt_id="+ to_string(aid) + " AND question_id=" + qid;
+    auto old = db.rows(query);
+    string answerText = "NULL";
+    if (!isMCQ)
+        answerText = "'" + db.escape(val) + "'";
+    if (old.empty())
+    {
+        query = "INSERT INTO student_answers "
+                "(attempt_id, question_id, selected_option_id, answer_text, marks_awarded) VALUES ("
+                + to_string(aid) + ", " + qid + ", " + mcqVal + ", "
+                + answerText + ", 0)";
+
+        db.exec(query);
+        return;
+    }
+    if (val.empty() && !overwriteEmpty)
+        return;
+    query = "UPDATE student_answers SET selected_option_id=" + mcqVal
+          + ", answer_text=" + answerText
+          + " WHERE answer_id=" + old[0][0];
+    db.exec(query);
+}
