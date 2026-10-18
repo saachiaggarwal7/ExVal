@@ -56,5 +56,36 @@ void redirect(int fd,const std::string&to) {
     std::string msg="HTTP/1.1 302 Found\r\nLocation: "+to+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
     ::send(fd,msg.c_str(),msg.size(),0);
 }
+Request readRequest(int fd) {
+    Request r; char buf[8192]; std::string raw; int n;
+    while(raw.find("\r\n\r\n")==std::string::npos && raw.size()<1024*1024) {
+        n=recv(fd,buf,sizeof(buf),0); if(n<=0) break; raw.append(buf,n);
+    }
+    size_t sep=raw.find("\r\n\r\n");
+    if(sep==std::string::npos) return r;
+    std::string head=raw.substr(0,sep); r.body=raw.substr(sep+4);
+    std::istringstream hs(head); std::string line; std::getline(hs,line);
+    if(!line.empty()&&line.back()=='\r') line.pop_back();
+    std::istringstream ls(line); ls>>r.method; std::string target; ls>>target;
+    size_t q=target.find('?');
+    if(q==std::string::npos) r.path=target;
+    else {r.path=target.substr(0,q);r.query=parsePairs(target.substr(q+1));}
+    while(std::getline(hs,line)) {
+        if(!line.empty()&&line.back()=='\r') line.pop_back();
+        size_t c=line.find(':');
+        if(c!=std::string::npos) {
+            std::string k=line.substr(0,c),v=line.substr(c+1);
+            while(!v.empty()&&v[0]==' ') v.erase(v.begin());
+            r.headers[k]=v;
+        }
+    }
+    size_t len=0; if(r.headers.count("Content-Length")) len=std::stoul(r.headers["Content-Length"]);
+    while(r.body.size()<len) {n=recv(fd,buf,sizeof(buf),0);if(n<=0)break;r.body.append(buf,n);}
+    if(r.method=="POST") r.form=parsePairs(r.body);
+    return r;
+}
+
+long long idOf(const std::string&s){try{return std::stoll(s);}catch(...){return 0;}}
+
 
 
