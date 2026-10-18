@@ -292,6 +292,205 @@ window.addEventListener('pagehide',recordVisibleQuestionTime);
 )JS";
 }
 
+bool handleStudent(int fd, Request& r, const Session& s, Database& db) {
+    if (s.role != "STUDENT") return false;
+    db.closeExpiredExams();
+    if (r.path == "/student")
+    {
+    auto exams = db.rows(
+        "SELECT exam_id, title, duration_minutes, allow_multiple_attempts "
+        "FROM exams WHERE status='PUBLISHED' ORDER BY exam_id DESC"
+    );
+    string b = "<h1>Student Dashboard</h1>";
+    b += "<p>Welcome, " + html(s.name);
+    b += " | <a href='/analytics'>My Analytics</a>";
+    b += " | <a href='/logout'>Logout</a></p>";
+    b += "<h2>Available Exams</h2>";
+    for (auto& e : exams)
+    {
+        b += "<div class='card'><h3>" + html(e[1]) + "</h3>";
+        b += "<p>Duration: " + e[2] + " minutes</p>";
+        string buttonText = "Start / Resume Exam";
+        if (e[3] == "1")
+            buttonText = "Start New / Resume Exam";
+        b += "<form method='post' action='/start'>";
+        b += "<input type='hidden' name='exam_id' value='" + e[0] + "'>";
+        b += "<button class='btn'>" + buttonText + "</button>";
+        b += "</form></div>";
+    }
+    if (exams.empty())
+        b += "<p>No published exams.</p>";
+
+    auto previous = db.rows(
+        "CALL get_student_results(" + to_string(s.userId) + ")"
+    );
+    if (previous.empty())
+    {
+        previous = db.rows(
+            "SELECT attempt_id, student_name, exam_name, total_marks, "
+            "obtained_marks, status, "
+            "DATE_FORMAT(submitted_at,'%Y-%m-%d %H:%i') "
+            "FROM student_result_view WHERE student_id="
+            + to_string(s.userId) + " ORDER BY attempt_id DESC"
+        );
+    }
+    b += "<h2>Previous Attempts</h2>";
+    if (previous.empty())
+    {
+        b += "<p>No submitted exams yet.</p>";
+    }
+    else
+    {
+        b += "<div class='card'><table>";
+        b += "<tr><th>Exam</th><th>Score</th><th>Submitted</th><th></th></tr>";
+        for (auto& row : previous)
+        {
+            string submitted = "";
+            if (row.size() > 6)
+                submitted = row[6];
+            b += "<tr><td>" + html(row[2]) + "</td>";
+            b += "<td>" + row[4] + " / " + row[3] + "</td>";
+            b += "<td>" + html(submitted) + "</td>";
+            b += "<td><a href='/result?attempt_id=" + row[0] + "'>";
+            b += "View result</a></td></tr>";
+        }
+        b += "</table></div>";
+    }
+    sendResponse(fd, 200, page("Student", b));
+    return true;
+    }
+    
+    if (r.path == "/start" && r.method == "POST")
+    {
+        long long eid = idOf(r.form["exam_id"]);
+        string query = "SELECT allow_multiple_attempts FROM exams "
+                      "WHERE exam_id=" + to_string(eid)
+                      + " AND status='PUBLISHED'";
+        auto exam = db.rows(query);
+        if (exam.empty())
+        {
+            sendResponse(fd, 400, page("Exam unavailable",
+                "<h2>This exam is not currently published.</h2>"
+                "<p><a href='/student'>Back to dashboard</a></p>"));
+            return true;
+        }
+        query = "SELECT attempt_id FROM exam_attempts "
+                "WHERE exam_id=" + to_string(eid)
+                + " AND student_id=" + to_string(s.userId)
+                + " AND status='IN_PROGRESS' "
+                "ORDER BY attempt_id DESC LIMIT 1";
+        auto active = db.rows(query);
+        query = "SELECT attempt_id FROM exam_attempts "
+                "WHERE exam_id=" + to_string(eid)
+                + " AND student_id=" + to_string(s.userId)
+                + " ORDER BY attempt_id DESC LIMIT 1";
+        auto previous = db.rows(query);
+        long long aid;
+        if (!active.empty())
+        {
+            aid = idOf(active[0][0]);
+        }
+        else if (!previous.empty() && exam[0][0] != "1")
+        {
+            redirect(fd, "/result?attempt_id=" + previous[0][0]);
+            return true;
+        }
+        else
+        {
+            db.exec("INSERT INTO exam_attempts(exam_id, student_id) VALUES("
+                    + to_string(eid) + ", " + to_string(s.userId) + ")");
+
+            aid = db.lastId();
+        }
+        redirect(fd, "/take?attempt_id=" + to_string(aid));
+        return true;
+    }
+
+    if (r.path == "/save_answer" && r.method == "POST")
+    {
+        long long aid = idOf(r.form["attempt_id"]);
+        long long qid = idOf(r.form["question_id"]);
+        string query = "SELECT attempt_id FROM exam_attempts "
+                      "WHERE attempt_id=" + to_string(aid)
+                      + " AND student_id=" + to_string(s.userId)
+                      + " AND status='IN_PROGRESS'";
+        auto own = db.rows(query);
+        query = "SELECT question_type FROM questions WHERE question_id="
+                + to_string(qid);
+        auto q = db.rows(query);
+        if (own.empty() || q.empty())
+        {
+            sendResponse(fd, 400, "invalid", "text/plain");
+            return true;
+        }
+        string val = "";
+        if (r.form.count("value"))
+            val = r.form.at("value");
+        int spent = max(0, (int)idOf(r.form["time_spent_seconds"]));
+        bool isMCQ = (q[0][0] == "MCQ");
+        string mcqVal = "NULL";
+        if (isMCQ && !val.empty())
+            mcqVal = val;
+        query = "SELECT answer_id FROM student_answers WHERE attempt_id="
+                + to_string(aid) + " AND question_id=" + to_string(qid);
+        auto old = db.rows(query);
+        string answerText = "NULL";
+        if (!isMCQ)
+            answerText = "'" + db.escape(val) + "'";
+        if (old.empty())
+        {
+            query = "INSERT INTO student_answers "
+                    "(attempt_id, question_id, selected_option_id, "
+                    "answer_text, time_spent_seconds) VALUES ("
+                    + to_string(aid) + ", " + to_string(qid) + ", "
+                    + mcqVal + ", " + answerText + ", "
+                    + to_string(spent) + ")";
+            db.exec(query);
+        }
+        else
+        {
+            query = "UPDATE student_answers SET selected_option_id="
+                    + mcqVal + ", answer_text=" + answerText
+                    + ", time_spent_seconds=GREATEST(time_spent_seconds, "
+                    + to_string(spent) + ") WHERE answer_id=" + old[0][0];
+            db.exec(query);
+        }
+        sendResponse(fd, 200, "saved", "text/plain");
+        return true;
+    }
+  
+    if (r.path == "/save_question_time" && r.method == "POST")
+    {
+        long long aid = idOf(r.form["attempt_id"]);
+        long long qid = idOf(r.form["question_id"]);
+        int spent = max(0, (int)idOf(r.form["time_spent_seconds"]));
+        string query = "SELECT ea.attempt_id FROM exam_attempts ea "
+                      "JOIN questions q ON q.exam_id = ea.exam_id "
+                      "WHERE ea.attempt_id=" + to_string(aid)
+                      + " AND ea.student_id=" + to_string(s.userId)
+                      + " AND ea.status='IN_PROGRESS' "
+                      "AND q.question_id=" + to_string(qid);
+        auto own = db.rows(query);
+        if (own.empty())
+        {
+            sendResponse(fd, 400, "invalid", "text/plain");
+            return true;
+        }
+        query = "INSERT INTO student_answers "
+                "(attempt_id, question_id, time_spent_seconds) VALUES ("
+                + to_string(aid) + ", "
+                + to_string(qid) + ", "
+                + to_string(spent) + ") "
+                "ON DUPLICATE KEY UPDATE "
+                "time_spent_seconds = GREATEST(time_spent_seconds, "
+                "VALUES(time_spent_seconds))";
+        db.exec(query);
+        sendResponse(fd, 200, "saved", "text/plain");
+        return true;
+    }
+    
+
+
 
 
 
