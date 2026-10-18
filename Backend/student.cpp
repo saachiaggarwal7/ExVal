@@ -295,6 +295,79 @@ window.addEventListener('pagehide',recordVisibleQuestionTime);
 bool handleStudent(int fd, Request& r, const Session& s, Database& db) {
     if (s.role != "STUDENT") return false;
     db.closeExpiredExams();
+    if (r.path == "/analytics")
+{
+    auto stats = db.rows(
+        "SELECT COUNT(*), "
+        "COALESCE(ROUND(AVG(100.0 * obtained_marks / "
+        "NULLIF(total_marks, 0)), 1), 0), "
+        "COALESCE(SUM(obtained_marks), 0), "
+        "COALESCE(SUM(total_marks), 0) "
+        "FROM exam_attempts "
+        "WHERE student_id = " + to_string(s.userId) +
+        " AND status = 'SUBMITTED'"
+    );
+
+    auto history = db.rows(
+        "SELECT ea.attempt_id, e.title, "
+        "ea.obtained_marks, ea.total_marks, "
+        "DATE_FORMAT(ea.submitted_at, '%Y-%m-%d %H:%i') "
+        "FROM exam_attempts ea "
+        "JOIN exams e ON e.exam_id = ea.exam_id "
+        "WHERE ea.student_id = " + to_string(s.userId) +
+        " AND ea.status = 'SUBMITTED' "
+        "ORDER BY ea.submitted_at DESC"
+    );
+
+    string b = "<h1>My Analytics</h1>";
+
+    b += "<p><a href='/student'>Back to Dashboard</a> | ";
+    b += "<a href='/logout'>Logout</a></p>";
+
+    if (!stats.empty())
+    {
+        b += "<div class='card'>";
+        b += "<h3>Performance Summary</h3>";
+
+        b += "<p>Exams completed: " + stats[0][0] + "</p>";
+        b += "<p>Average score: " + stats[0][1] + "%</p>";
+        b += "<p>Total marks obtained: " + stats[0][2] +
+             " / " + stats[0][3] + "</p>";
+
+        b += "</div>";
+    }
+
+    b += "<h2>Exam History</h2>";
+
+    if (history.empty())
+    {
+        b += "<p>You haven't completed any exams yet.</p>";
+    }
+    else
+    {
+        b += "<div class='card'><table>";
+        b += "<tr><th>Exam</th><th>Score</th>";
+        b += "<th>Submitted</th><th>Result</th></tr>";
+
+        for (auto& row : history)
+        {
+            b += "<tr>";
+            b += "<td>" + html(row[1]) + "</td>";
+            b += "<td>" + row[2] + " / " + row[3] + "</td>";
+            b += "<td>" + html(row[4]) + "</td>";
+
+            b += "<td><a href='/result?attempt_id=" +
+                 row[0] + "'>View Result</a></td>";
+
+            b += "</tr>";
+        }
+
+        b += "</table></div>";
+    }
+
+    sendResponse(fd, 200, page("My Analytics", b));
+    return true;
+}
     if (r.path == "/student")
     {
     auto exams = db.rows(
@@ -611,7 +684,89 @@ bool handleStudent(int fd, Request& r, const Session& s, Database& db) {
         sendJson(200, json);
         return true;
     }
-  ```cpp
+    if (r.path == "/submit_exam" && r.method == "POST")
+{
+    long long aid = idOf(r.form["attempt_id"]);
+
+    // Check that this attempt belongs to the student
+    string query =
+        "SELECT exam_id, status FROM exam_attempts "
+        "WHERE attempt_id=" + to_string(aid) +
+        " AND student_id=" + to_string(s.userId);
+
+    auto attempt = db.rows(query);
+
+    if (attempt.empty())
+    {
+        sendResponse(fd, 404, "Attempt not found", "text/plain");
+        return true;
+    }
+
+    // If already submitted, show the result
+    if (attempt[0][1] == "SUBMITTED")
+    {
+        redirect(fd, "/result?attempt_id=" + to_string(aid));
+        return true;
+    }
+
+    // Get the exam questions
+    query =
+        "SELECT question_id, question_type, marks, "
+        "time_limit_seconds, memory_limit_mb "
+        "FROM exam_questions_safe WHERE exam_id=" + attempt[0][0];
+
+    auto questions = db.rows(query);
+
+    if (questions.empty())
+    {
+        questions = db.rows(
+            "SELECT question_id, question_type, marks, "
+            "time_limit_seconds, memory_limit_mb "
+            "FROM questions WHERE exam_id=" + attempt[0][0]
+        );
+    }
+
+    // Save any answers included in the final form submission
+    for (auto& q : questions)
+    {
+        string key = "q_" + q[0];
+
+        if (r.form.count(key))
+        {
+            bool isMCQ = (q[1] == "MCQ");
+
+            upsertAnswer(
+                db,
+                aid,
+                q[0],
+                isMCQ,
+                r.form.at(key),
+                true
+            );
+        }
+    }
+
+    // Calculate the total marks
+    int total = 0;
+
+    for (auto& q : questions)
+        total += stoi(q[2]);
+
+    // Evaluate the answers
+    int obtained = gradeAttempt(db, aid, questions);
+
+    // Save the final result
+    db.begin();
+
+    if (finalizeAttempt(db, aid, total, obtained))
+        db.commit();
+    else
+        db.rollback();
+
+    // Open the result page
+    redirect(fd, "/result?attempt_id=" + to_string(aid));
+    return true;
+}
 if (r.path == "/take")
 {
     long long aid = idOf(r.query["attempt_id"]);
@@ -1031,11 +1186,3 @@ if (r.path == "/result") {
 }
 return false;
 }
-
-
-
-
-
-
-
-
