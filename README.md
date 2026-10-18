@@ -38,6 +38,62 @@ When a student submits code, it goes into a queue. Three worker threads pick job
 | Examiner (again) | Results -> Review Descriptive -> give marks and feedback -> save. Then look at the Results page for score distribution, question difficulty and test-case pass rates |
 | Admin | View users and the recent activity logs |
 
+## Set up and run
+
+Run the following commands from the project root. For a fresh database,
+import the SQL files once:
+
+``` bash
+mysql -u root < database/schema.sql
+mysql -u root < database/seed.sql
+mysql -u root < database/views.sql
+mysql -u root < database/triggers.sql
+mysql -u root < database/procedures.sql
+mysql -u root < database/setup_user.sql
+```
+
+If your MySQL root account requires a password, add `-p` after `-u root`
+and enter it when prompted.
+
+The app uses these local database settings:
+
+  Setting    Value
+  ---------- --------------
+  Database   `exval`
+  Username   `exval_user`
+  Password   `exval123`
+
+Build the backend:
+
+``` bash
+make -C backend
+```
+
+Start ExVal:
+
+``` bash
+DB_HOST=localhost DB_USER=exval_user DB_PASSWORD=exval123 DB_NAME=exval ./run.sh
+```
+
+Open <http://localhost:8080> in your browser.
+
+For an existing database, the latest analytics features require the
+`time_spent_seconds` column in `student_answers` and the
+`code_test_case_results` table. Apply the database update from your
+project notes before running the updated backend if these are missing.
+
+## Demo logins
+
+  Role       Email                    Password
+  ---------- ------------------------ ------------
+  Admin      `admin@example.com`      `password`
+  Examiner   `teacher@example.com`    `password`
+  Student    `student1@example.com`   `password`
+  Student    `student2@example.com`   `password`
+
+These accounts are for local testing only.
+
+
 ## OS concepts used
 
 - **Process management:** `fork()`, `exec()`, `waitpid()` and `kill()` to compile and run student code
@@ -56,5 +112,3 @@ When a student submits code, it goes into a queue. Three worker threads pick job
 - **View:** `student_result_view` for a simple result summary
 - **Trigger:** logs an activity entry when an attempt becomes SUBMITTED
 - **Stored procedure:** `get_student_results(studentId)` returns a student's results
-
-
