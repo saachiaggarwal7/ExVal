@@ -71,6 +71,9 @@ CREATE TABLE exam_attempts (
     status ENUM('IN_PROGRESS','SUBMITTED') DEFAULT 'IN_PROGRESS',
     total_marks INT DEFAULT 0,
     obtained_marks INT DEFAULT 0,
+    anticheat_warnings INT DEFAULT 0,
+    is_disqualified BOOLEAN DEFAULT FALSE,
+    disqualification_reason VARCHAR(255) DEFAULT NULL,
     FOREIGN KEY (exam_id) REFERENCES exams(exam_id),
     FOREIGN KEY (student_id) REFERENCES users(user_id),
     INDEX idx_attempt_exam_student (exam_id, student_id),
@@ -88,6 +91,7 @@ CREATE TABLE student_answers (
     marks_awarded INT DEFAULT 0,
     feedback TEXT NULL,
     evaluated_by INT NULL,
+    selected_version_id INT NULL,
     FOREIGN KEY (attempt_id) REFERENCES exam_attempts(attempt_id) ON DELETE CASCADE,
     FOREIGN KEY (question_id) REFERENCES questions(question_id),
     FOREIGN KEY (selected_option_id) REFERENCES mcq_options(option_id),
@@ -142,4 +146,46 @@ CREATE TABLE activity_logs (
     FOREIGN KEY (user_id) REFERENCES users(user_id),
     INDEX idx_log_user (user_id),
     INDEX idx_log_action (action)
+);
+
+-- ============================================================
+-- CODE VERSIONING: Students can save multiple versions of their
+-- coding solutions and choose which one to submit.
+-- ============================================================
+CREATE TABLE code_versions (
+    version_id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL,
+    question_id INT NOT NULL,
+    student_id INT NOT NULL,
+    version_number INT NOT NULL DEFAULT 1,
+    version_label VARCHAR(100) NOT NULL DEFAULT 'Version 1',
+    source_code MEDIUMTEXT NOT NULL,
+    is_selected BOOLEAN NOT NULL DEFAULT FALSE,
+    is_autosave BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (attempt_id) REFERENCES exam_attempts(attempt_id) ON DELETE CASCADE,
+    FOREIGN KEY (question_id) REFERENCES questions(question_id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES users(user_id),
+    INDEX idx_cv_attempt_question (attempt_id, question_id),
+    INDEX idx_cv_student (student_id)
+);
+
+-- ============================================================
+-- ANTI-CHEAT: Logs every suspicious event (tab switch, copy,
+-- paste, fullscreen exit, blur, etc.) per attempt.
+-- ============================================================
+CREATE TABLE anticheat_logs (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    attempt_id INT NOT NULL,
+    student_id INT NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    event_detail TEXT,
+    warning_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (attempt_id) REFERENCES exam_attempts(attempt_id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES users(user_id),
+    INDEX idx_ac_attempt (attempt_id),
+    INDEX idx_ac_student (student_id),
+    INDEX idx_ac_event (event_type)
 );
