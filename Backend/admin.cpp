@@ -6,21 +6,41 @@
 static std::string adminStyles() {
     return R"HTML(
 <style>
-.admin-wrap { width: 95%; margin: 0 auto; }
-.admin-card { background: white; border: 1px solid #ccc; padding: 15px; margin: 15px 0; }
-.admin-card h2 { color: #234; }
+.admin-wrap { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+.admin-header { margin-bottom: 24px; }
+.admin-header h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; color: #0f172a; }
+.admin-header p { margin: 0; color: #64748b; font-size: 14px; }
+.action-bar { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+.action-bar button { padding: 8px 16px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #475569; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.action-bar button:hover { background: #f8fafc; border-color: #94a3b8; }
+.action-bar button.primary { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.stat-card.alert-card { border-left: 4px solid #dc2626; }
+.stat-label { color: #64748b; font-size: 13px; font-weight: 500; margin-bottom: 8px; }
+.stat-value { color: #0f172a; font-size: 28px; font-weight: 600; margin-bottom: 4px; }
+.stat-meta { color: #94a3b8; font-size: 12px; }
+.topology-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.topology-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 16px; }
+.topology-card h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: #0f172a; }
+.topology-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+.topology-item:last-child { margin-bottom: 0; }
+.item-label { color: #64748b; }
+.item-value { color: #0f172a; font-weight: 500; font-family: monospace; }
+.admin-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+.admin-card h2 { margin: 0 0 16px; font-size: 18px; font-weight: 600; color: #0f172a; }
 .db-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-.db-table th { background: #234; color: white; padding: 8px; text-align: left; }
-.db-table td { padding: 8px; border-bottom: 1px solid #ddd; }
-.tab-bar { margin-bottom: 12px; }
-.tab-btn { padding: 7px 12px; margin: 3px; border: 1px solid #aaa; background: #eee; cursor: pointer; }
-.tab-btn.active { background: #234; color: white; }
+.db-table th { background: #f8fafc; color: #475569; padding: 12px 16px; text-align: left; font-size: 13px; font-weight: 600; border-bottom: 1px solid #e2e8f0; }
+.db-table td { padding: 12px 16px; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+.tab-bar { margin-bottom: 16px; display: flex; gap: 4px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 16px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #475569; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+.tab-btn:hover { background: #f8fafc; }
+.tab-btn.active { background: #0f172a; color: #f8fafc; border-color: #0f172a; }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
-.stat-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
-.stat-box { background: #eef3f9; border: 1px solid #ccc; padding: 12px; text-align: center; min-width: 130px; }
-.stat-box .num { font-size: 24px; font-weight: bold; }
-.stat-box .lbl { font-size: 13px; margin-top: 4px; }
+.badge-clean{background:#ecfdf5;color:#059669;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:600}
+.badge-warn{background:#fffbeb;color:#d97706;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:600}
+.badge-disq{background:#fef2f2;color:#dc2626;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:600}
 </style>
 )HTML";
 }
@@ -59,7 +79,8 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
         // Whitelist of allowed tables
         static const std::vector<std::string> allowed = {
             "users","roles","exams","questions","mcq_options","test_cases",
-            "exam_attempts","student_answers","code_submissions","execution_results","code_test_case_results","activity_logs"
+            "exam_attempts","student_answers","code_submissions","execution_results","code_test_case_results","activity_logs",
+            "code_test_case_results","activity_logs","code_versions","anticheat_logs"
         };
         bool ok = false;
         for (auto& t : allowed) if (t == tbl) { ok = true; break; }
@@ -92,6 +113,9 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
         auto eCount  = db.rows("SELECT COUNT(*) FROM exams");
         auto atCount = db.rows("SELECT COUNT(*) FROM exam_attempts");
         auto subCount= db.rows("SELECT COUNT(*) FROM code_submissions");
+        auto acCount  = db.rows("SELECT COUNT(*) FROM anticheat_logs");
+        auto disqCount= db.rows("SELECT COUNT(*) FROM exam_attempts WHERE is_disqualified = 1");
+
 
         std::string b = adminStyles();
         b += "<div class='admin-wrap'><h1>Admin Dashboard</h1>"
