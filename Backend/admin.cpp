@@ -116,28 +116,118 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
         auto acCount  = db.rows("SELECT COUNT(*) FROM anticheat_logs");
         auto disqCount= db.rows("SELECT COUNT(*) FROM exam_attempts WHERE is_disqualified = 1");
 
-
         std::string b = adminStyles();
-        b += "<div class='admin-wrap'><h1>Admin Dashboard</h1>"
-             "<p>Welcome, "+html(s.name)+" | <a href='/logout'>Logout</a></p>";
+        b += "<div class='admin-wrap'>"
+             "<div class='admin-header'>"
+             "<h1>Admin Dashboard &amp; Proctor Center</h1>"
+             "<p>System Architecture, User Roles &amp; Platform-Wide Anti-Cheat Monitoring</p>"
+             "<p style='color:#64748b;margin-top:8px'>Welcome, "+html(s.name)+" | <a href='/logout'>Logout</a></p>"
+             "</div>";
 
         // Stats row
         b += "<div class='stat-grid'>";
-        b += "<div class='stat-box'><div class='num'>"+(uCount.empty()?"0":uCount[0][0])+"</div><div class='lbl'>Users</div></div>";
-        b += "<div class='stat-box'><div class='num'>"+(eCount.empty()?"0":eCount[0][0])+"</div><div class='lbl'>Exams</div></div>";
-        b += "<div class='stat-box'><div class='num'>"+(atCount.empty()?"0":atCount[0][0])+"</div><div class='lbl'>Attempts</div></div>";
-        b += "<div class='stat-box'><div class='num'>"+(subCount.empty()?"0":subCount[0][0])+"</div><div class='lbl'>Code Submissions</div></div>";
+        b += "<div class='stat-card'>"
+             "<div class='stat-label'>Active Concurrency</div>"
+             "<div class='stat-value'>"+(atCount.empty()?"0":atCount[0][0])+"</div>"
+             "<div class='stat-meta'>Exam sessions total</div>"
+             "</div>";
+        b += "<div class='stat-card'>"
+             "<div class='stat-label'>Total Users</div>"
+             "<div class='stat-value'>"+(uCount.empty()?"0":uCount[0][0])+"</div>"
+             "<div class='stat-meta'>Students, Examiners &amp; Admins</div>"
+             "</div>";
+        b += "<div class='stat-card'>"
+             "<div class='stat-label'>Published Exams</div>"
+             "<div class='stat-value'>"+(eCount.empty()?"0":eCount[0][0])+"</div>"
+             "<div class='stat-meta'>Active assessments</div>"
+             "</div>";
+        b += "<div class='stat-card'>"
+             "<div class='stat-label'>Code Submissions</div>"
+             "<div class='stat-value'>"+(subCount.empty()?"0":subCount[0][0])+"</div>"
+             "<div class='stat-meta'>Sandboxed executions</div>"
+             "</div>";
+        b += "<div class='stat-card alert-card'>"
+             "<div class='stat-label'>Anti-Cheat Incidents</div>"
+             "<div class='stat-value' style='color:#dc2626'>"+(acCount.empty()?"0":acCount[0][0])+"</div>"
+             "<div class='stat-meta'>"+(disqCount.empty()?"0":disqCount[0][0])+" auto-submitted for cheating</div>"
+             "</div>";
         b += "</div>";
 
+        // Anti-Cheat Proctoring Security Center (High-Risk Attempts)
+        auto flaggedAttempts = db.rows(
+            "SELECT ea.attempt_id, u.name, u.email, e.title, ea.anticheat_warnings, "
+            "ea.is_disqualified, COALESCE(ea.disqualification_reason, ''), "
+            "DATE_FORMAT(ea.started_at, '%Y-%m-%d %H:%i') "
+            "FROM exam_attempts ea "
+            "JOIN users u ON ea.student_id = u.user_id "
+            "JOIN exams e ON ea.exam_id = e.exam_id "
+            "WHERE ea.anticheat_warnings > 0 OR ea.is_disqualified = 1 "
+            "ORDER BY ea.is_disqualified DESC, ea.anticheat_warnings DESC LIMIT 20");
+
+        b += "<div class='admin-card' style='border-left:5px solid #dc2626'>"
+             "<h2 style='color:#991b1b;display:flex;align-items:center;gap:8px'>🛡 Anti-Cheat Proctoring &amp; High-Risk Activity</h2>"
+             "<p style='color:#64748b;font-size:14px;margin-bottom:16px'>Real-time tracking of students with warnings (tab switches, fullscreen exits, copy/paste attempts) or automatic disqualification.</p>";
+        if (flaggedAttempts.empty()) {
+            b += "<p style='color:#059669;font-weight:500'>✓ All clear. No students have exceeded warning thresholds or triggered cheating flags.</p>";
+        } else {
+            b += "<div style='overflow-x:auto'><table class='db-table'><tr>"
+                 "<th>Student</th><th>Email</th><th>Exam</th><th>Warnings</th><th>Status</th><th>Violation Detail</th><th>Started</th></tr>";
+            for (auto& row : flaggedAttempts) {
+                int warns = std::stoi(row[4]);
+                bool isDisq = (row[5] == "1");
+                std::string stBadge = "<span class='badge-clean'>Active</span>";
+                if (isDisq || warns >= 3) stBadge = "<span class='badge-disq'>🚨 Auto-Submitted (3 Warnings)</span>";
+                else if (warns > 0) stBadge = "<span class='badge-warn'>⚠️ " + std::to_string(warns) + " / 3 Warnings</span>";
+
+                b += "<tr>"
+                     "<td><b>"+html(row[1])+"</b></td>"
+                     "<td>"+html(row[2])+"</td>"
+                     "<td>"+html(row[3])+"</td>"
+                     "<td><b>"+std::to_string(warns)+" / 3</b></td>"
+                     "<td>"+stBadge+"</td>"
+                     "<td>"+(row[6].empty()?std::string("Tab/window switching detected"):html(row[6]))+"</td>"
+                     "<td>"+html(row[7])+"</td>"
+                     "</tr>";
+            }
+            b += "</table></div>";
+        }
+        b += "</div>";
+
+        // System topology grid
+        b += "<div class='admin-card'>"
+             "<h2>System Architecture &amp; Sandboxing Engine</h2>"
+             "<div class='topology-grid'>"
+             "<div class='topology-card'>"
+             "<h3>Queue Dispatcher</h3>"
+             "<div class='topology-item'><span class='item-label'>Algorithm Policy</span><span class='item-value'>FCFS Priority</span></div>"
+             "<div class='topology-item'><span class='item-label'>Concurrency Primitive</span><span class='item-value'>std::mutex / std::condition_variable</span></div>"
+             "<div class='topology-item'><span class='item-label'>Current Status</span><span class='item-value' style='color:#059669'>Active</span></div>"
+             "</div>"
+             "<div class='topology-card'>"
+             "<h3>Thread Worker Pool</h3>"
+             "<div class='topology-item'><span class='item-label'>Worker Threads</span><span class='item-value'>N=3 POSIX Threads</span></div>"
+             "<div class='topology-item'><span class='item-label'>Compilation Sandbox</span><span class='item-value'>fork() / exec() / waitpid()</span></div>"
+             "<div class='topology-item'><span class='item-label'>Resource Limits</span><span class='item-value'>setrlimit(RLIMIT_DATA/AS)</span></div>"
+             "</div>"
+             "<div class='topology-card'>"
+             "<h3>Database &amp; Integrity Cluster</h3>"
+             "<div class='topology-item'><span class='item-label'>Engine</span><span class='item-value'>MySQL InnoDB</span></div>"
+             "<div class='topology-item'><span class='item-label'>Isolation Level</span><span class='item-value'>REPEATABLE READ</span></div>"
+             "<div class='topology-item'><span class='item-label'>Code Versioning</span><span class='item-value' style='color:#059669'>Multi-Version Snapshots</span></div>"
+             "</div>"
+             "</div>"
+             "</div>";
+
+        // User management
         auto people = db.rows(
             "SELECT u.user_id,u.name,u.email,r.role_name,u.is_active FROM users u "
             "JOIN roles r ON r.role_id=u.role_id ORDER BY r.role_name,u.name");
         b += "<div class='admin-card'><h2>Manage Users &amp; Roles</h2>"
-             "<form method='post' action='/admin_create_user' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end'>"
-             "<label>Name<input name='name' required></label>"
-             "<label>Email<input name='email' type='email' required></label>"
-             "<label>Password<input name='password' required></label>"
-             "<label>Role<select name='role'><option>STUDENT</option><option>EXAMINER</option><option>ADMIN</option></select></label>"
+             "<form method='post' action='/admin_create_user' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end;margin-bottom:20px'>"
+             "<label style='display:block'><span style='display:block;margin-bottom:6px;color:#475569;font-weight:500;font-size:14px'>Name</span><input name='name' required style='width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;background:#fff'></label>"
+             "<label style='display:block'><span style='display:block;margin-bottom:6px;color:#475569;font-weight:500;font-size:14px'>Email</span><input name='email' type='email' required style='width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;background:#fff'></label>"
+             "<label style='display:block'><span style='display:block;margin-bottom:6px;color:#475569;font-weight:500;font-size:14px'>Password</span><input name='password' required style='width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;background:#fff'></label>"
+             "<label style='display:block'><span style='display:block;margin-bottom:6px;color:#475569;font-weight:500;font-size:14px'>Role</span><select name='role' style='width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:14px;background:#fff'><option>STUDENT</option><option>EXAMINER</option><option>ADMIN</option></select></label>"
              "<button class='btn'>Create user</button></form>"
              "<table class='db-table'><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th><th></th></tr>";
         for (const auto& u : people) {
@@ -149,24 +239,7 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
         }
         b += "</table></div>";
 
-        // System-wide cohort analytics. Teachers see the equivalent data for
-        // their own exam on /exam_results; admin can see the whole platform.
-        auto score = db.rows("SELECT COUNT(*),COALESCE(ROUND(AVG(100.0*obtained_marks/NULLIF(total_marks,0)),1),0),(SELECT COALESCE(ROUND(AVG(NULLIF(sa.time_spent_seconds,0))/60,1),0) FROM student_answers sa JOIN exam_attempts ea2 ON ea2.attempt_id=sa.attempt_id WHERE ea2.status='SUBMITTED'),(SELECT COUNT(*) FROM student_answers sa JOIN exam_attempts ea2 ON ea2.attempt_id=sa.attempt_id WHERE ea2.status='SUBMITTED' AND sa.time_spent_seconds>0) FROM exam_attempts WHERE status='SUBMITTED'");
-        auto difficult = db.rows(
-            "SELECT e.title,q.question_type,q.question_text,COALESCE(ROUND(100.0*AVG(sa.marks_awarded/NULLIF(q.marks,0)),1),0),COALESCE(ROUND(AVG(sa.time_spent_seconds)),0) "
-            "FROM student_answers sa JOIN questions q ON q.question_id=sa.question_id JOIN exams e ON e.exam_id=q.exam_id JOIN exam_attempts ea ON ea.attempt_id=sa.attempt_id "
-            "WHERE ea.status='SUBMITTED' GROUP BY q.question_id,e.title,q.question_type,q.question_text HAVING COUNT(sa.answer_id)>0 ORDER BY AVG(sa.marks_awarded/NULLIF(q.marks,0)) ASC LIMIT 8");
-        b += "<div class='admin-card'><h2>Platform analytics</h2>";
-        if (!score.empty() && score[0][0] != "0") {
-            b += "<p><b>Submitted attempts:</b> "+score[0][0]+" &nbsp; <b>Average score:</b> "+score[0][1]+"% &nbsp; <b>Average active question time:</b> "+(score[0][3]=="0"?std::string("Not tracked yet"):score[0][2]+" min")+"</p>";
-            b += "<h3>Hardest questions by observed performance</h3><table class='db-table'><tr><th>Exam</th><th>Type</th><th>Question</th><th>Accuracy</th><th>Avg time</th></tr>";
-            for (const auto& row : difficult)
-                b += "<tr><td>"+html(row[0])+"</td><td>"+html(row[1])+"</td><td>"+html(row[2].substr(0,90))+(row[2].size()>90?"…":"")+"</td><td>"+row[3]+"%</td><td>"+row[4]+" sec</td></tr>";
-            b += "</table>";
-        } else b += "<p>No submitted attempts yet.</p>";
-        b += "</div>";
-
-        // Tab bar for tables
+        // Tab bar for tables (including code_versions and anticheat_logs)
         static const std::vector<std::pair<std::string,std::string>> tables = {
             {"users",            "Users"},
             {"roles",            "Roles"},
@@ -179,10 +252,12 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
             {"code_submissions", "Submissions"},
             {"execution_results","Exec Results"},
             {"code_test_case_results","Test Case Results"},
+            {"code_versions",    "Code Versions"},
+            {"anticheat_logs",   "Anti-Cheat Logs"},
             {"activity_logs",    "Activity Logs"},
         };
 
-        b += "<div class='admin-card'><h2>Database Tables</h2><div class='tab-bar'>";
+        b += "<div class='admin-card'><h2>Database Tables Browser</h2><div class='tab-bar'>";
         for (size_t i = 0; i < tables.size(); ++i)
             b += std::string("<button class='tab-btn") + (i==0?" active":"") + "' onclick='showTab(\""+tables[i].first+"\")' id='btn_"+tables[i].first+"'>"+tables[i].second+"</button>";
         b += "</div>";
@@ -195,9 +270,9 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
             auto data = db.rows("SELECT * FROM " + tname + " ORDER BY 1 DESC LIMIT 100");
 
             if (data.empty()) {
-                b += "<p style='color:#888'>No records.</p>";
+                b += "<p style='color:#64748b'>No records.</p>";
             } else {
-                b += "<p style='font-size:13px;color:#666'>Showing "+std::to_string(data.size())+" rows (max 100)</p>";
+                b += "<p style='font-size:13px;color:#64748b'>Showing "+std::to_string(data.size())+" rows (max 100)</p>";
                 b += "<div style='overflow-x:auto'><table class='db-table'><tr>";
                 for (auto& c : cols) b += "<th>"+html(c[0])+"</th>";
                 b += "</tr>";
@@ -211,7 +286,7 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
             }
             b += "</div>";
         }
-        b += "</div>"; // admin-card
+        b += "</div>";
 
         // Recent activity
         b += "<div class='admin-card'><h2>Recent Activity (last 30)</h2>";
@@ -220,7 +295,7 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
             "FROM activity_logs al LEFT JOIN users u ON al.user_id=u.user_id "
             "ORDER BY al.log_id DESC LIMIT 30");
         if (logs.empty()) {
-            b += "<p>No activity yet.</p>";
+            b += "<p style='color:#64748b'>No activity yet.</p>";
         } else {
             b += "<table class='db-table'><tr><th>Time</th><th>User</th><th>Action</th><th>Details</th></tr>";
             for (auto& l : logs)
@@ -230,36 +305,23 @@ bool handleAdmin(int fd, Request& r, const Session& s, Database& db) {
         b += "</div>";
 
         b += R"HTML(<script>
-function showTab(name) {
-    var contents = document.getElementsByClassName("tab-content");
-    var buttons = document.getElementsByClassName("tab-btn");
-    var i;
-
-    for (i = 0; i < contents.length; i++) {
-        contents[i].classList.remove("active");
-    }
-
-    for (i = 0; i < buttons.length; i++) {
-        buttons[i].classList.remove("active");
-    }
-
-    var selectedTab = document.getElementById("tab_" + name);
-    var selectedButton = document.getElementById("btn_" + name);
-
-    if (selectedTab != null) {
-        selectedTab.classList.add("active");
-    }
-
-    if (selectedButton != null) {
-        selectedButton.classList.add("active");
-    }
+function showTab(name){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el=>el.classList.remove('active'));
+  const t=document.getElementById('tab_'+name);
+  const b=document.getElementById('btn_'+name);
+  if(t) t.classList.add('active');
+  if(b) b.classList.add('active');
 }
 </script>)HTML";
 
         b += "</div>"; // admin-wrap
-        sendResponse(fd, 200, page("Admin", b));
+        sendResponse(fd, 200, page("Admin Dashboard", b));
         return true;
     }
 
     return false;
 }
+
+
+        
